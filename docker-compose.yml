@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  postgres:
+    container_name: microstakes-postgres
+    image: postgres:15
+    environment:
+      POSTGRES_DB: micro_stakes
+      POSTGRES_USER: micro_stakes
+      POSTGRES_PASSWORD: 3Uj*kgpZdAvMH!
+      POSTGRES_MULTIPLE_DATABASES: micro_stakes_keycloak
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - microstakes_postgres_data:/var/lib/postgresql/data
+
+  keycloak:
+    container_name: microstakes-keycloak
+    image: quay.io/keycloak/keycloak:22.0
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/micro_stakes_keycloak
+      KC_DB_USERNAME: micro_stakes
+      KC_DB_PASSWORD: 3Uj*kgpZdAvMH!
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    command: start-dev
+
+  app:
+    container_name: microstakes-app
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: micro_stakes
+      DB_PASSWORD: 3Uj*kgpZdAvMH!
+      DB_NAME: micro_stakes
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: micro-stakes
+      KEYCLOAK_CLIENT_ID: micro-stakes-api
+      KEYCLOAK_CLIENT_SECRET: w!OpGOa2
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    depends_on:
+      - postgres
+      - keycloak
+
+volumes:
+  microstakes_postgres_data:
