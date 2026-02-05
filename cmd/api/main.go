@@ -13,5 +13,10 @@ func main() {
 
 	r.GET("/health", container.HealthCheckHandler().Handle)
 
+	authRoutes := r.Group("/auth")
+	{
+		authRoutes.POST("/register", container.AuthHandler().Register)
+	}
+
 	log.Fatal(r.Run(":3003"))
 }
