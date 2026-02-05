@@ -5,9 +5,9 @@ services:
     container_name: microstakes-postgres
     image: postgres:15
     environment:
-      POSTGRES_DB: micro_stakes
-      POSTGRES_USER: micro_stakes
-      POSTGRES_PASSWORD: 3Uj*kgpZdAvMH!
+      POSTGRES_DB: '${DB_NAME}'
+      POSTGRES_USER: '${DB_USER}'
+      POSTGRES_PASSWORD: '${DB_PASSWORD}'
       POSTGRES_MULTIPLE_DATABASES: micro_stakes_keycloak
     ports:
       - "5432:5432"
@@ -19,12 +19,12 @@ services:
     container_name: microstakes-keycloak
     image: quay.io/keycloak/keycloak:22.0
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_ADMIN: '${KEYCLOAK_ADMIN_USER}'
+      KEYCLOAK_ADMIN_PASSWORD: '${KEYCLOAK_ADMIN_PASSWORD}'
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/micro_stakes_keycloak
-      KC_DB_USERNAME: micro_stakes
-      KC_DB_PASSWORD: 3Uj*kgpZdAvMH!
+      KC_DB_USERNAME: '${DB_USER}'
+      KC_DB_PASSWORD: '${DB_PASSWORD}'
     ports:
       - "8081:8080"
     depends_on:
@@ -40,15 +40,15 @@ services:
       PORT: 8080
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: micro_stakes
-      DB_PASSWORD: 3Uj*kgpZdAvMH!
-      DB_NAME: micro_stakes
-      KEYCLOAK_URL: http://keycloak:8080
-      KEYCLOAK_REALM: micro-stakes
-      KEYCLOAK_CLIENT_ID: micro-stakes-api
-      KEYCLOAK_CLIENT_SECRET: w!OpGOa2
-      KEYCLOAK_ADMIN_USER: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      DB_USER: '${DB_USER}'
+      DB_PASSWORD: '${DB_PASSWORD}'
+      DB_NAME: '${DB_NAME}'
+      KEYCLOAK_URL: http://keycloak:8081
+      KEYCLOAK_REALM: '${KEYCLOAK_REALM}'
+      KEYCLOAK_CLIENT_ID: '${KEYCLOAK_CLIENT_ID}'
+      KEYCLOAK_CLIENT_SECRET: '${KEYCLOAK_CLIENT_SECRET}'
+      KEYCLOAK_ADMIN_USER: '${KEYCLOAK_ADMIN_USER}'
+      KEYCLOAK_ADMIN_PASSWORD: '${KEYCLOAK_ADMIN_PASSWORD}'
     depends_on:
       - postgres
       - keycloak
