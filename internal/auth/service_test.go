@@ -193,3 +193,184 @@ func TestAuthService_Register(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthService_Login(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	tests := []struct {
+		name         string
+		input        LoginInput
+		mockIDPSetup func(*MockIdentityProvider)
+		expectError  bool
+		errorType    error
+	}{
+		{
+			name: "success - valid credentials",
+			input: LoginInput{
+				Email:    "john.doe@example.com",
+				Password: "SecureP@ss123",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				tokens := &identity.AuthTokens{
+					AccessToken:      "access-token-123",
+					RefreshToken:     "refresh-token-456",
+					TokenType:        "Bearer",
+					ExpiresIn:        900,
+					RefreshExpiresIn: 604800,
+				}
+				idp.On("ValidateCredentials", ctx, "john.doe@example.com", "SecureP@ss123").Return(tokens, nil)
+			},
+			expectError: false,
+		},
+		{
+			name: "error - invalid credentials",
+			input: LoginInput{
+				Email:    "john.doe@example.com",
+				Password: "WrongPassword",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("ValidateCredentials", ctx, "john.doe@example.com", "WrongPassword").Return(nil, ErrInvalidCredentials)
+			},
+			expectError: true,
+			errorType:   ErrInvalidCredentials,
+		},
+		{
+			name: "error - identity provider failure",
+			input: LoginInput{
+				Email:    "jane.smith@example.com",
+				Password: "AnotherP@ss456",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("ValidateCredentials", ctx, "jane.smith@example.com", "AnotherP@ss456").Return(nil, errors.New("keycloak unavailable"))
+			},
+			expectError: true,
+			errorType:   ErrIdentityProviderError,
+		},
+		{
+			name: "error - token generation failed",
+			input: LoginInput{
+				Email:    "bob.johnson@example.com",
+				Password: "ValidP@ss789",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("ValidateCredentials", ctx, "bob.johnson@example.com", "ValidP@ss789").Return(nil, ErrTokenGenerationFailed)
+			},
+			expectError: true,
+			errorType:   ErrTokenGenerationFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockIDP := new(MockIdentityProvider)
+			tt.mockIDPSetup(mockIDP)
+
+			mockRepo := new(MockUserRepository)
+			service := NewAuthService(mockRepo, mockIDP, logger)
+
+			output, err := service.Login(ctx, tt.input)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, output)
+				if tt.errorType != nil {
+					assert.ErrorIs(t, err, tt.errorType)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, output)
+				assert.NotEmpty(t, output.AccessToken)
+				assert.NotEmpty(t, output.RefreshToken)
+				assert.Equal(t, "Bearer", output.TokenType)
+				assert.Equal(t, 900, output.ExpiresIn)
+				assert.Equal(t, 604800, output.RefreshExpiresIn)
+			}
+
+			mockIDP.AssertExpectations(t)
+		})
+	}
+}
+
+func TestAuthService_RefreshToken(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	tests := []struct {
+		name         string
+		input        RefreshTokenInput
+		mockIDPSetup func(*MockIdentityProvider)
+		expectError  bool
+		errorType    error
+	}{
+		{
+			name: "success - valid refresh token",
+			input: RefreshTokenInput{
+				RefreshToken: "valid-refresh-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				tokens := &identity.AuthTokens{
+					AccessToken:      "new-access-token-123",
+					RefreshToken:     "new-refresh-token-456",
+					TokenType:        "Bearer",
+					ExpiresIn:        900,
+					RefreshExpiresIn: 604800,
+				}
+				idp.On("RefreshToken", ctx, "valid-refresh-token").Return(tokens, nil)
+			},
+			expectError: false,
+		},
+		{
+			name: "error - invalid refresh token",
+			input: RefreshTokenInput{
+				RefreshToken: "invalid-refresh-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("RefreshToken", ctx, "invalid-refresh-token").Return(nil, ErrInvalidCredentials)
+			},
+			expectError: true,
+			errorType:   ErrInvalidCredentials,
+		},
+		{
+			name: "error - identity provider failure",
+			input: RefreshTokenInput{
+				RefreshToken: "valid-but-fails-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("RefreshToken", ctx, "valid-but-fails-token").Return(nil, errors.New("keycloak unavailable"))
+			},
+			expectError: true,
+			errorType:   ErrIdentityProviderError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockIDP := new(MockIdentityProvider)
+			tt.mockIDPSetup(mockIDP)
+
+			mockRepo := new(MockUserRepository)
+			service := NewAuthService(mockRepo, mockIDP, logger)
+
+			output, err := service.RefreshToken(ctx, tt.input)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, output)
+				if tt.errorType != nil {
+					assert.ErrorIs(t, err, tt.errorType)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, output)
+				assert.NotEmpty(t, output.AccessToken)
+				assert.NotEmpty(t, output.RefreshToken)
+				assert.Equal(t, "Bearer", output.TokenType)
+				assert.Equal(t, 900, output.ExpiresIn)
+				assert.Equal(t, 604800, output.RefreshExpiresIn)
+			}
+
+			mockIDP.AssertExpectations(t)
+		})
+	}
+}

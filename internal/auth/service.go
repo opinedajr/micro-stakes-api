@@ -13,6 +13,8 @@ import (
 
 type AuthService interface {
 	Register(ctx context.Context, input RegisterInput) (*RegisterOutput, error)
+	Login(ctx context.Context, input LoginInput) (*AuthOutput, error)
+	RefreshToken(ctx context.Context, input RefreshTokenInput) (*AuthOutput, error)
 }
 
 type authService struct {
@@ -75,5 +77,63 @@ func (s *authService) Register(ctx context.Context, input RegisterInput) (*Regis
 		Email:    user.Email,
 		FullName: user.FullName,
 		Message:  "User registered successfully",
+	}, nil
+}
+
+func (s *authService) Login(ctx context.Context, input LoginInput) (*AuthOutput, error) {
+	if err := s.validator.Struct(input); err != nil {
+		s.logger.Error("validation failed", "error", err)
+		return nil, WrapError(ErrValidationFailed, err.Error())
+	}
+
+	tokens, err := s.identityProvider.ValidateCredentials(ctx, input.Email, input.Password)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			s.logger.Warn("invalid credentials attempt", "email", input.Email)
+			return nil, ErrInvalidCredentials
+		}
+		if errors.Is(err, ErrTokenGenerationFailed) {
+			s.logger.Error("token generation failed", "email", input.Email, "error", err)
+			return nil, ErrTokenGenerationFailed
+		}
+		s.logger.Error("identity provider error during login", "email", input.Email, "error", err)
+		return nil, WrapError(ErrIdentityProviderError, "authentication failed")
+	}
+
+	s.logger.Info("user logged in successfully", "email", input.Email)
+
+	return &AuthOutput{
+		AccessToken:      tokens.AccessToken,
+		RefreshToken:     tokens.RefreshToken,
+		TokenType:        tokens.TokenType,
+		ExpiresIn:        tokens.ExpiresIn,
+		RefreshExpiresIn: tokens.RefreshExpiresIn,
+	}, nil
+}
+
+func (s *authService) RefreshToken(ctx context.Context, input RefreshTokenInput) (*AuthOutput, error) {
+	if err := s.validator.Struct(input); err != nil {
+		s.logger.Error("validation failed", "error", err)
+		return nil, WrapError(ErrValidationFailed, err.Error())
+	}
+
+	tokens, err := s.identityProvider.RefreshToken(ctx, input.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			s.logger.Warn("invalid refresh token attempt")
+			return nil, ErrInvalidCredentials
+		}
+		s.logger.Error("identity provider error during token refresh", "error", err)
+		return nil, WrapError(ErrIdentityProviderError, "token refresh failed")
+	}
+
+	s.logger.Info("token refreshed successfully")
+
+	return &AuthOutput{
+		AccessToken:      tokens.AccessToken,
+		RefreshToken:     tokens.RefreshToken,
+		TokenType:        tokens.TokenType,
+		ExpiresIn:        tokens.ExpiresIn,
+		RefreshExpiresIn: tokens.RefreshExpiresIn,
 	}, nil
 }
