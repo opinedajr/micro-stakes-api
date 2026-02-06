@@ -83,6 +83,27 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	c.JSON(http.StatusOK, output)
 }
 
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var input LogoutInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		h.logger.Error("invalid request body", "error", err)
+		c.JSON(http.StatusBadRequest, ErrorOutput{
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+			Details: nil,
+		})
+		return
+	}
+
+	output, err := h.service.Logout(c.Request.Context(), input)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, output)
+}
+
 func (h *AuthHandler) handleError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrUserAlreadyExists):

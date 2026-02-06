@@ -31,6 +31,14 @@ type AuthOutput struct {
 	RefreshExpiresIn int    `json:"refresh_expires_in"`
 }
 
+type LogoutInput struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type LogoutOutput struct {
+	Message string `json:"message"`
+}
+
 type ErrorOutput struct {
 	Error   string              `json:"error"`
 	Code    string              `json:"code"`

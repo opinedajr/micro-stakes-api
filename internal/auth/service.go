@@ -15,6 +15,7 @@ type AuthService interface {
 	Register(ctx context.Context, input RegisterInput) (*RegisterOutput, error)
 	Login(ctx context.Context, input LoginInput) (*AuthOutput, error)
 	RefreshToken(ctx context.Context, input RefreshTokenInput) (*AuthOutput, error)
+	Logout(ctx context.Context, input LogoutInput) (*LogoutOutput, error)
 }
 
 type authService struct {
@@ -135,5 +136,23 @@ func (s *authService) RefreshToken(ctx context.Context, input RefreshTokenInput)
 		TokenType:        tokens.TokenType,
 		ExpiresIn:        tokens.ExpiresIn,
 		RefreshExpiresIn: tokens.RefreshExpiresIn,
+	}, nil
+}
+
+func (s *authService) Logout(ctx context.Context, input LogoutInput) (*LogoutOutput, error) {
+	if err := s.validator.Struct(input); err != nil {
+		s.logger.Error("validation failed", "error", err)
+		return nil, WrapError(ErrValidationFailed, err.Error())
+	}
+
+	if err := s.identityProvider.RevokeTokens(ctx, input.RefreshToken); err != nil {
+		s.logger.Error("identity provider error during logout", "error", err)
+		return nil, WrapError(ErrIdentityProviderError, "logout failed")
+	}
+
+	s.logger.Info("user logged out successfully")
+
+	return &LogoutOutput{
+		Message: "Logged out successfully",
 	}, nil
 }

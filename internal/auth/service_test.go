@@ -374,3 +374,74 @@ func TestAuthService_RefreshToken(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthService_Logout(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	tests := []struct {
+		name         string
+		input        LogoutInput
+		mockIDPSetup func(*MockIdentityProvider)
+		expectError  bool
+		errorType    error
+	}{
+		{
+			name: "success - valid logout",
+			input: LogoutInput{
+				RefreshToken: "valid-refresh-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("RevokeTokens", ctx, "valid-refresh-token").Return(nil)
+			},
+			expectError: false,
+		},
+		{
+			name: "success - idempotent logout (already revoked token)",
+			input: LogoutInput{
+				RefreshToken: "already-revoked-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("RevokeTokens", ctx, "already-revoked-token").Return(nil)
+			},
+			expectError: false,
+		},
+		{
+			name: "error - identity provider failure",
+			input: LogoutInput{
+				RefreshToken: "valid-but-fails-token",
+			},
+			mockIDPSetup: func(idp *MockIdentityProvider) {
+				idp.On("RevokeTokens", ctx, "valid-but-fails-token").Return(errors.New("keycloak unavailable"))
+			},
+			expectError: true,
+			errorType:   ErrIdentityProviderError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockIDP := new(MockIdentityProvider)
+			tt.mockIDPSetup(mockIDP)
+
+			mockRepo := new(MockUserRepository)
+			service := NewAuthService(mockRepo, mockIDP, logger)
+
+			output, err := service.Logout(ctx, tt.input)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, output)
+				if tt.errorType != nil {
+					assert.ErrorIs(t, err, tt.errorType)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, output)
+				assert.Equal(t, "Logged out successfully", output.Message)
+			}
+
+			mockIDP.AssertExpectations(t)
+		})
+	}
+}

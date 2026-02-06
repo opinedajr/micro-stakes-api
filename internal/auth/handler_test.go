@@ -46,6 +46,14 @@ func (m *MockAuthService) RefreshToken(ctx context.Context, input RefreshTokenIn
 	return args.Get(0).(*AuthOutput), args.Error(1)
 }
 
+func (m *MockAuthService) Logout(ctx context.Context, input LogoutInput) (*LogoutOutput, error) {
+	args := m.Called(ctx, input)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*LogoutOutput), args.Error(1)
+}
+
 func TestAuthHandler_Register(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -457,6 +465,127 @@ func TestAuthHandler_RefreshToken(t *testing.T) {
 			assert.NoError(t, err)
 
 			req, err := http.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBuffer(body))
+			assert.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatusCode, w.Code)
+			tt.validateResponse(t, w)
+
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestAuthHandler_Logout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		_ = customValidator.RegisterCustomValidators(v)
+	}
+
+	tests := []struct {
+		name               string
+		requestBody        interface{}
+		mockServiceSetup   func(*MockAuthService)
+		expectedStatusCode int
+		validateResponse   func(*testing.T, *httptest.ResponseRecorder)
+	}{
+		{
+			name: "success - valid logout",
+			requestBody: LogoutInput{
+				RefreshToken: "valid-refresh-token",
+			},
+			mockServiceSetup: func(service *MockAuthService) {
+				output := &LogoutOutput{
+					Message: "Logged out successfully",
+				}
+				service.On("Logout", mock.Anything, mock.MatchedBy(func(input LogoutInput) bool {
+					return input.RefreshToken == "valid-refresh-token"
+				})).Return(output, nil)
+			},
+			expectedStatusCode: http.StatusOK,
+			validateResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response LogoutOutput
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.Equal(t, "Logged out successfully", response.Message)
+			},
+		},
+		{
+			name: "error - invalid request body",
+			requestBody: map[string]string{
+				"invalid": "data",
+			},
+			mockServiceSetup: func(service *MockAuthService) {
+			},
+			expectedStatusCode: http.StatusBadRequest,
+			validateResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ErrorOutput
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.Equal(t, "VALIDATION_ERROR", response.Code)
+			},
+		},
+		{
+			name: "success - idempotent logout (token already revoked)",
+			requestBody: LogoutInput{
+				RefreshToken: "already-revoked-token",
+			},
+			mockServiceSetup: func(service *MockAuthService) {
+				output := &LogoutOutput{
+					Message: "Logged out successfully",
+				}
+				service.On("Logout", mock.Anything, mock.MatchedBy(func(input LogoutInput) bool {
+					return input.RefreshToken == "already-revoked-token"
+				})).Return(output, nil)
+			},
+			expectedStatusCode: http.StatusOK,
+			validateResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response LogoutOutput
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.Equal(t, "Logged out successfully", response.Message)
+			},
+		},
+		{
+			name: "error - identity provider error",
+			requestBody: LogoutInput{
+				RefreshToken: "valid-but-fails-token",
+			},
+			mockServiceSetup: func(service *MockAuthService) {
+				service.On("Logout", mock.Anything, mock.MatchedBy(func(input LogoutInput) bool {
+					return input.RefreshToken == "valid-but-fails-token"
+				})).Return(nil, WrapError(ErrIdentityProviderError, "keycloak unavailable"))
+			},
+			expectedStatusCode: http.StatusInternalServerError,
+			validateResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ErrorOutput
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.Equal(t, "IDENTITY_PROVIDER_ERROR", response.Code)
+				assert.Equal(t, "Authentication service unavailable", response.Error)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockService := new(MockAuthService)
+			tt.mockServiceSetup(mockService)
+
+			handler := NewAuthHandler(mockService, logger)
+
+			router := gin.New()
+			router.POST("/auth/logout", handler.Logout)
+
+			body, err := json.Marshal(tt.requestBody)
+			assert.NoError(t, err)
+
+			req, err := http.NewRequest(http.MethodPost, "/auth/logout", bytes.NewBuffer(body))
 			assert.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
 
