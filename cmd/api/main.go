@@ -16,6 +16,9 @@ func main() {
 	authRoutes := r.Group("/auth")
 	{
 		authRoutes.POST("/register", container.AuthHandler().Register)
+		authRoutes.POST("/login", container.AuthHandler().Login)
+		authRoutes.POST("/refresh", container.AuthHandler().RefreshToken)
+		authRoutes.POST("/logout", container.AuthHandler().Logout)
 	}
 
 	log.Fatal(r.Run(":3003"))
