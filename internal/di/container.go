@@ -1,6 +1,7 @@
 package di
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/opinedajr/micro-stakes-api/internal/auth"
@@ -68,7 +69,9 @@ func (c *Container) Logger() *slog.Logger {
 
 func (c *Container) DB() *gorm.DB {
 	if c.db == nil {
-		db, err := database.NewPostgresConnection(c.Config().Database, c.Logger())
+		ctx := context.Background()
+		pgDB := database.NewPostgresDatabase(c.Config().Database, c.Logger())
+		db, err := pgDB.Connect(ctx)
 		if err != nil {
 			panic("failed to connect to database: " + err.Error())
 		}
