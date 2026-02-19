@@ -10,6 +10,9 @@ func RegisterCustomValidators(v *validator.Validate) error {
 	if err := v.RegisterValidation("password", validatePassword); err != nil {
 		return err
 	}
+	if err := v.RegisterValidation("currency", validateCurrency); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -25,4 +28,15 @@ func validatePassword(fl validator.FieldLevel) bool {
 	hasDigit := regexp.MustCompile(`[0-9]`).MatchString(password)
 
 	return hasUpper && hasLower && hasDigit
+}
+
+func validateCurrency(fl validator.FieldLevel) bool {
+	currency := fl.Field().String()
+	validCurrencies := map[string]bool{
+		"BRL": true,
+		"USD": true,
+		"EUR": true,
+		"BTC": true,
+	}
+	return validCurrencies[currency]
 }

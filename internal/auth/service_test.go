@@ -445,3 +445,89 @@ func TestAuthService_Logout(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthService_GetUserByIdentityID(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	tests := []struct {
+		name          string
+		identityID    string
+		adapter       IdentityAdapter
+		mockRepoSetup func(*MockUserRepository)
+		expectError   bool
+		errorType     error
+	}{
+		{
+			name:       "success - user found by identity id",
+			identityID: "keycloak-user-id-123",
+			adapter:    IdentityAdapterKeycloak,
+			mockRepoSetup: func(repo *MockUserRepository) {
+				user := &User{
+					ID:              1,
+					Email:           "john.doe@example.com",
+					FullName:        "John Doe",
+					IdentityID:      "keycloak-user-id-123",
+					IdentityAdapter: IdentityAdapterKeycloak,
+				}
+				repo.On("FindByIdentityID", ctx, "keycloak-user-id-123", IdentityAdapterKeycloak).Return(user, nil)
+			},
+			expectError: false,
+		},
+		{
+			name:       "error - user not found",
+			identityID: "nonexistent-user-id",
+			adapter:    IdentityAdapterKeycloak,
+			mockRepoSetup: func(repo *MockUserRepository) {
+				repo.On("FindByIdentityID", ctx, "nonexistent-user-id", IdentityAdapterKeycloak).Return(nil, ErrUserNotFound)
+			},
+			expectError: true,
+			errorType:   ErrUserNotFound,
+		},
+		{
+			name:       "error - database error",
+			identityID: "keycloak-user-id-456",
+			adapter:    IdentityAdapterKeycloak,
+			mockRepoSetup: func(repo *MockUserRepository) {
+				repo.On("FindByIdentityID", ctx, "keycloak-user-id-456", IdentityAdapterKeycloak).Return(nil, errors.New("database connection lost"))
+			},
+			expectError: true,
+		},
+		{
+			name:       "error - empty identity id",
+			identityID: "",
+			adapter:    IdentityAdapterKeycloak,
+			mockRepoSetup: func(repo *MockUserRepository) {
+			},
+			expectError: true,
+			errorType:   ErrUserNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := new(MockUserRepository)
+			tt.mockRepoSetup(mockRepo)
+
+			mockIDP := new(MockIdentityProvider)
+			service := NewAuthService(mockRepo, mockIDP, logger)
+
+			user, err := service.GetUserByIdentityID(ctx, tt.identityID, tt.adapter)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, user)
+				if tt.errorType != nil {
+					assert.ErrorIs(t, err, tt.errorType)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.identityID, user.IdentityID)
+				assert.Equal(t, IdentityAdapterKeycloak, user.IdentityAdapter)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
+}
