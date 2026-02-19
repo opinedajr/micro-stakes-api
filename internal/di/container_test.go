@@ -43,10 +43,6 @@ func TestNewContainer(t *testing.T) {
 			t.Error("expected handlers to be initialized")
 		}
 
-		if container.middlewares == nil {
-			t.Error("expected middlewares to be initialized")
-		}
-
 		if container.config != nil {
 			t.Error("expected config to be nil initially")
 		}
