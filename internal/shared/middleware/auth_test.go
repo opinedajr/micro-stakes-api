@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +16,41 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/opinedajr/micro-stakes-api/internal/auth"
 	"github.com/opinedajr/micro-stakes-api/internal/shared/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockAuthService struct {
+	getUserByIdentityIDFn func(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error)
+}
+
+func (m *mockAuthService) Register(ctx context.Context, input auth.RegisterInput) (*auth.RegisterOutput, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) Login(ctx context.Context, input auth.LoginInput) (*auth.AuthOutput, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) RefreshToken(ctx context.Context, input auth.RefreshTokenInput) (*auth.AuthOutput, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) Logout(ctx context.Context, input auth.LogoutInput) (*auth.LogoutOutput, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) GetUserByIdentityID(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error) {
+	if m.getUserByIdentityIDFn != nil {
+		return m.getUserByIdentityIDFn(ctx, identityID, adapter)
+	}
+	return &auth.User{
+		ID:    1,
+		Email: "test@example.com",
+	}, nil
+}
 
 func generateTestKeyPair(t *testing.T) (*rsa.PrivateKey, *rsa.PublicKey) {
 	t.Helper()
@@ -200,7 +233,7 @@ func TestAuthMiddleware(t *testing.T) {
 			}
 
 			router := gin.New()
-			router.Use(AuthMiddleware(cfg))
+			router.Use(AuthMiddleware(cfg, &mockAuthService{}, slog.Default()))
 			router.GET("/test", func(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{"status": "ok"})
 			})
@@ -248,11 +281,11 @@ func TestAuthMiddleware_UserIDAndEmailInContext(t *testing.T) {
 	}, 1*time.Hour)
 
 	router := gin.New()
-	router.Use(AuthMiddleware(cfg))
+	router.Use(AuthMiddleware(cfg, &mockAuthService{}, slog.Default()))
 	router.GET("/test", func(c *gin.Context) {
 		userID, exists := c.Get("userID")
 		assert.True(t, exists)
-		assert.Equal(t, "user-123", userID)
+		assert.Equal(t, "1", userID)
 
 		email, exists := c.Get("email")
 		assert.True(t, exists)
@@ -423,6 +456,156 @@ func TestParseRSAPublicKey(t *testing.T) {
 				assert.NotNil(t, parsedKey)
 				assert.Equal(t, publicKey.N, parsedKey.N)
 				assert.Equal(t, publicKey.E, parsedKey.E)
+			}
+		})
+	}
+}
+
+func TestAuthMiddleware_NewUserResolutionFlow(t *testing.T) {
+	privateKey, publicKey := generateTestKeyPair(t)
+
+	mockServer := httptest.NewServer(createMockJWKSHandler(t, publicKey))
+	defer mockServer.Close()
+
+	cfg := config.KeycloakConfig{
+		URL:   mockServer.URL,
+		Realm: "test-realm",
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name               string
+		prepareToken       func() string
+		mockServiceFn      func(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error)
+		expectedStatusCode int
+		expectedError      string
+		expectedCode       string
+		validateContext    func(t *testing.T, c *gin.Context)
+	}{
+		{
+			name: "success - valid token and user found",
+			prepareToken: func() string {
+				return createTestToken(t, privateKey, jwt.MapClaims{
+					"sub":   "keycloak-user-123",
+					"email": "user@example.com",
+				}, 1*time.Hour)
+			},
+			mockServiceFn: func(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error) {
+				return &auth.User{
+					ID:    42,
+					Email: "user@example.com",
+				}, nil
+			},
+			expectedStatusCode: http.StatusOK,
+			validateContext: func(t *testing.T, c *gin.Context) {
+				userID, exists := c.Get("userID")
+				assert.True(t, exists, "userID should be in context")
+				assert.Equal(t, "42", userID, "userID should be string representation of user ID")
+
+				email, exists := c.Get("email")
+				assert.True(t, exists, "email should be in context")
+				assert.Equal(t, "user@example.com", email, "email should match user email")
+			},
+		},
+		{
+			name: "error - missing subject claim",
+			prepareToken: func() string {
+				return createTestToken(t, privateKey, jwt.MapClaims{
+					"email": "user@example.com",
+				}, 1*time.Hour)
+			},
+			mockServiceFn:      nil,
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedError:      "Invalid subject claim in token",
+			expectedCode:       "INVALID_SUBJECT_CLAIM",
+		},
+		{
+			name: "error - subject claim is not string",
+			prepareToken: func() string {
+				token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+					"sub":   123,
+					"email": "user@example.com",
+					"exp":   time.Now().Add(1 * time.Hour).Unix(),
+				})
+				token.Header["kid"] = "test-key-id"
+				tokenString, err := token.SignedString(privateKey)
+				require.NoError(t, err)
+				return tokenString
+			},
+			mockServiceFn:      nil,
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedError:      "Invalid subject claim in token",
+			expectedCode:       "INVALID_SUBJECT_CLAIM",
+		},
+		{
+			name: "error - user not found",
+			prepareToken: func() string {
+				return createTestToken(t, privateKey, jwt.MapClaims{
+					"sub":   "unknown-keycloak-id",
+					"email": "unknown@example.com",
+				}, 1*time.Hour)
+			},
+			mockServiceFn: func(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error) {
+				return nil, auth.ErrUserNotFound
+			},
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedError:      "User not found",
+			expectedCode:       "USER_NOT_FOUND",
+		},
+		{
+			name: "error - internal database error",
+			prepareToken: func() string {
+				return createTestToken(t, privateKey, jwt.MapClaims{
+					"sub":   "user-123",
+					"email": "user@example.com",
+				}, 1*time.Hour)
+			},
+			mockServiceFn: func(ctx context.Context, identityID string, adapter auth.IdentityAdapter) (*auth.User, error) {
+				return nil, fmt.Errorf("database connection failed")
+			},
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedError:      "Failed to resolve user",
+			expectedCode:       "INTERNAL_ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var authHeader string
+			if tt.prepareToken != nil {
+				authHeader = fmt.Sprintf("Bearer %s", tt.prepareToken())
+			}
+
+			mockService := &mockAuthService{
+				getUserByIdentityIDFn: tt.mockServiceFn,
+			}
+
+			router := gin.New()
+			router.Use(AuthMiddleware(cfg, mockService, slog.Default()))
+			router.GET("/test", func(c *gin.Context) {
+				if tt.validateContext != nil {
+					tt.validateContext(t, c)
+				}
+				c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			if authHeader != "" {
+				req.Header.Set("Authorization", authHeader)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatusCode, w.Code, "status code mismatch")
+
+			if tt.expectedError != "" {
+				var response map[string]interface{}
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedError, response["error"], "error message mismatch")
+				assert.Equal(t, tt.expectedCode, response["code"], "error code mismatch")
 			}
 		})
 	}
