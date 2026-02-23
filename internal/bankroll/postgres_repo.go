@@ -37,7 +37,37 @@ func (r *postgresBankrollRepository) Create(ctx context.Context, bankroll *Bankr
 }
 
 func (r *postgresBankrollRepository) Update(ctx context.Context, bankroll *Bankroll) error {
-	if err := r.db.WithContext(ctx).Save(bankroll).Error; err != nil {
+	var existingBankroll Bankroll
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", bankroll.ID, bankroll.UserID).
+		First(&existingBankroll).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return ErrBankrollNotFound
+		}
+		return WrapError(ErrDatabaseError, err.Error())
+	}
+
+	var otherBankroll Bankroll
+	err = r.db.WithContext(ctx).
+		Where("user_id = ? AND name = ? AND id != ?", bankroll.UserID, bankroll.Name, bankroll.ID).
+		First(&otherBankroll).Error
+
+	if err == nil {
+		return ErrBankrollNameExists
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		return WrapError(ErrDatabaseError, err.Error())
+	}
+
+	if err := r.db.WithContext(ctx).Model(&existingBankroll).Updates(map[string]interface{}{
+		"name":                  bankroll.Name,
+		"currency":              bankroll.Currency,
+		"start_date":            bankroll.StartDate,
+		"commission_percentage": bankroll.CommissionPercentage,
+	}).Error; err != nil {
 		return WrapError(ErrDatabaseError, err.Error())
 	}
 	return nil

@@ -50,19 +50,101 @@ func (h *BankrollHandler) CreateBankroll(c *gin.Context) {
 }
 
 func (h *BankrollHandler) ListBankrolls(c *gin.Context) {
-	panic("not implemented")
+	userID, err := h.getUserID(c)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	outputs, err := h.service.ListBankrolls(c.Request.Context(), userID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, outputs)
 }
 
 func (h *BankrollHandler) GetBankroll(c *gin.Context) {
-	panic("not implemented")
+	userID, err := h.getUserID(c)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	bankrollIDStr := c.Param("bankrollId")
+	bankrollID, err := strconv.ParseUint(bankrollIDStr, 10, 32)
+	if err != nil {
+		h.handleError(c, ErrUnauthorized)
+		return
+	}
+
+	output, err := h.service.GetBankroll(c.Request.Context(), userID, uint(bankrollID))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, output)
 }
 
 func (h *BankrollHandler) UpdateBankroll(c *gin.Context) {
-	panic("not implemented")
+	defer func() { _ = c.Request.Body.Close() }()
+
+	var input UpdateBankrollInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		h.logger.Error("invalid request body", "error", err)
+		c.JSON(http.StatusBadRequest, ErrorOutput{
+			Error:   "Invalid request body",
+			Code:    "VALIDATION_ERROR",
+			Details: nil,
+		})
+		return
+	}
+
+	userID, err := h.getUserID(c)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	bankrollIDStr := c.Param("bankrollId")
+	bankrollID, err := strconv.ParseUint(bankrollIDStr, 10, 32)
+	if err != nil {
+		h.handleError(c, ErrUnauthorized)
+		return
+	}
+
+	output, err := h.service.UpdateBankroll(c.Request.Context(), userID, uint(bankrollID), input)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, output)
 }
 
 func (h *BankrollHandler) ResetBankroll(c *gin.Context) {
-	panic("not implemented")
+	userID, err := h.getUserID(c)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	bankrollIDStr := c.Param("bankrollId")
+	bankrollID, err := strconv.ParseUint(bankrollIDStr, 10, 32)
+	if err != nil {
+		h.handleError(c, ErrUnauthorized)
+		return
+	}
+
+	output, err := h.service.ResetBankroll(c.Request.Context(), userID, uint(bankrollID))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, output)
 }
 
 func (h *BankrollHandler) handleError(c *gin.Context, err error) {

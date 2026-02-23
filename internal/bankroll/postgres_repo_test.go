@@ -302,6 +302,93 @@ func TestPostgresBankrollRepository_Update(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Updated Bankroll", updated.Name)
 		assert.Equal(t, 3.0, updated.CommissionPercentage)
+		assert.Equal(t, 1000.00, updated.InitialBalance)
+		assert.Equal(t, 1000.00, updated.CurrentBalance)
+	})
+
+	t.Run("duplicate name per user", func(t *testing.T) {
+		db := setupTestDB(t)
+		repo := NewPostgresBankrollRepository(db)
+		ctx := context.Background()
+
+		startDate, err := time.Parse("2006-01-02", "2026-02-01")
+		require.NoError(t, err)
+
+		bankroll1 := &Bankroll{
+			UserID:               1,
+			Name:                 "Bankroll 1",
+			Currency:             CurrencyBRL,
+			InitialBalance:       1000.00,
+			CurrentBalance:       1000.00,
+			StartDate:            startDate,
+			CommissionPercentage: 5.0,
+		}
+
+		bankroll2 := &Bankroll{
+			UserID:               1,
+			Name:                 "Bankroll 2",
+			Currency:             CurrencyUSD,
+			InitialBalance:       500.00,
+			CurrentBalance:       500.00,
+			StartDate:            startDate,
+			CommissionPercentage: 3.0,
+		}
+
+		err = repo.Create(ctx, bankroll1)
+		require.NoError(t, err)
+
+		err = repo.Create(ctx, bankroll2)
+		require.NoError(t, err)
+
+		bankroll1.Name = "Bankroll 2"
+		err = repo.Update(ctx, bankroll1)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrBankrollNameExists)
+	})
+
+	t.Run("same name different user", func(t *testing.T) {
+		db := setupTestDB(t)
+		repo := NewPostgresBankrollRepository(db)
+		ctx := context.Background()
+
+		startDate, err := time.Parse("2006-01-02", "2026-02-01")
+		require.NoError(t, err)
+
+		bankroll1 := &Bankroll{
+			UserID:               1,
+			Name:                 "Main Bankroll",
+			Currency:             CurrencyBRL,
+			InitialBalance:       1000.00,
+			CurrentBalance:       1000.00,
+			StartDate:            startDate,
+			CommissionPercentage: 5.0,
+		}
+
+		bankroll2 := &Bankroll{
+			UserID:               2,
+			Name:                 "Main Bankroll",
+			Currency:             CurrencyUSD,
+			InitialBalance:       500.00,
+			CurrentBalance:       500.00,
+			StartDate:            startDate,
+			CommissionPercentage: 3.0,
+		}
+
+		err = repo.Create(ctx, bankroll1)
+		require.NoError(t, err)
+
+		err = repo.Create(ctx, bankroll2)
+		require.NoError(t, err)
+
+		bankroll2.CommissionPercentage = 4.0
+		err = repo.Update(ctx, bankroll2)
+
+		assert.NoError(t, err)
+
+		updated, err := repo.FindByID(ctx, bankroll2.ID, 2)
+		require.NoError(t, err)
+		assert.Equal(t, 4.0, updated.CommissionPercentage)
 	})
 }
 
