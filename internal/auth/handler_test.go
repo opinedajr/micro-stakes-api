@@ -54,6 +54,14 @@ func (m *MockAuthService) Logout(ctx context.Context, input LogoutInput) (*Logou
 	return args.Get(0).(*LogoutOutput), args.Error(1)
 }
 
+func (m *MockAuthService) GetUserByIdentityID(ctx context.Context, identityID string, adapter IdentityAdapter) (*User, error) {
+	args := m.Called(ctx, identityID, adapter)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*User), args.Error(1)
+}
+
 func TestAuthHandler_Register(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))

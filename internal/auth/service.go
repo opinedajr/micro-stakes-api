@@ -16,6 +16,7 @@ type AuthService interface {
 	Login(ctx context.Context, input LoginInput) (*AuthOutput, error)
 	RefreshToken(ctx context.Context, input RefreshTokenInput) (*AuthOutput, error)
 	Logout(ctx context.Context, input LogoutInput) (*LogoutOutput, error)
+	GetUserByIdentityID(ctx context.Context, identityID string, adapter IdentityAdapter) (*User, error)
 }
 
 type authService struct {
@@ -155,4 +156,23 @@ func (s *authService) Logout(ctx context.Context, input LogoutInput) (*LogoutOut
 	return &LogoutOutput{
 		Message: "Logged out successfully",
 	}, nil
+}
+
+func (s *authService) GetUserByIdentityID(ctx context.Context, identityID string, adapter IdentityAdapter) (*User, error) {
+	if identityID == "" {
+		s.logger.Warn("identity id is empty")
+		return nil, ErrUserNotFound
+	}
+
+	user, err := s.repo.FindByIdentityID(ctx, identityID, adapter)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			s.logger.Warn("user not found by identity id", "identity_id", identityID, "adapter", adapter)
+			return nil, err
+		}
+		s.logger.Error("failed to find user by identity id", "identity_id", identityID, "adapter", adapter, "error", err)
+		return nil, err
+	}
+
+	return user, nil
 }

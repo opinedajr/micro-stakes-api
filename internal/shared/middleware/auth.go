@@ -4,13 +4,17 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/opinedajr/micro-stakes-api/internal/auth"
 	"github.com/opinedajr/micro-stakes-api/internal/shared/config"
 )
 
@@ -27,7 +31,7 @@ type JWKS struct {
 	Keys []JWK `json:"keys"`
 }
 
-func AuthMiddleware(cfg config.KeycloakConfig) gin.HandlerFunc {
+func AuthMiddleware(cfg config.KeycloakConfig, service auth.AuthService, logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -64,10 +68,30 @@ func AuthMiddleware(cfg config.KeycloakConfig) gin.HandlerFunc {
 			return
 		}
 
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("userID", claims["sub"])
-			c.Set("email", claims["email"])
+		claims := token.Claims.(jwt.MapClaims)
+
+		keycloakID, ok := claims["sub"].(string)
+		if !ok || keycloakID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid subject claim in token", "code": "INVALID_SUBJECT_CLAIM"})
+			c.Abort()
+			return
 		}
+
+		user, err := service.GetUserByIdentityID(c.Request.Context(), keycloakID, auth.IdentityAdapterKeycloak)
+		if err != nil {
+			if errors.Is(err, auth.ErrUserNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found", "code": "USER_NOT_FOUND"})
+				c.Abort()
+				return
+			}
+			logger.Error("failed to resolve user", "identity_id", keycloakID, "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve user", "code": "INTERNAL_ERROR"})
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", strconv.FormatUint(uint64(user.ID), 10))
+		c.Set("email", user.Email)
 
 		c.Next()
 	}

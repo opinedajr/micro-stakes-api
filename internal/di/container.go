@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/opinedajr/micro-stakes-api/internal/auth"
+	"github.com/opinedajr/micro-stakes-api/internal/bankroll"
 	"github.com/opinedajr/micro-stakes-api/internal/healthcheck"
 	"github.com/opinedajr/micro-stakes-api/internal/infrastructure/database"
 	"github.com/opinedajr/micro-stakes-api/internal/infrastructure/identity"
@@ -21,31 +22,30 @@ type Container struct {
 	repositories   *RepositoryDependencies
 	services       *ServiceDependencies
 	handlers       *HandlerDependencies
-	middlewares    *middlewareDependencies
 }
 
 type RepositoryDependencies struct {
-	userRepository auth.UserRepository
+	userRepository     auth.UserRepository
+	bankrollRepository bankroll.BankrollRepository
 }
 
 type HandlerDependencies struct {
 	healthcheckHandler *healthcheck.Handler
 	authHandler        *auth.AuthHandler
+	bankrollHandler    *bankroll.BankrollHandler
 }
 
 type ServiceDependencies struct {
 	healthcheckService *healthcheck.Service
 	authService        auth.AuthService
+	bankrollService    bankroll.BankrollService
 }
-
-type middlewareDependencies struct{}
 
 func NewContainer() *Container {
 	return &Container{
 		repositories: &RepositoryDependencies{},
 		services:     &ServiceDependencies{},
 		handlers:     &HandlerDependencies{},
-		middlewares:  &middlewareDependencies{},
 	}
 }
 
@@ -131,4 +131,31 @@ func (c *Container) AuthHandler() *auth.AuthHandler {
 		)
 	}
 	return c.handlers.authHandler
+}
+
+func (c *Container) BankrollRepository() bankroll.BankrollRepository {
+	if c.repositories.bankrollRepository == nil {
+		c.repositories.bankrollRepository = bankroll.NewPostgresBankrollRepository(c.DB())
+	}
+	return c.repositories.bankrollRepository
+}
+
+func (c *Container) BankrollService() bankroll.BankrollService {
+	if c.services.bankrollService == nil {
+		c.services.bankrollService = bankroll.NewBankrollService(
+			c.BankrollRepository(),
+			c.Logger(),
+		)
+	}
+	return c.services.bankrollService
+}
+
+func (c *Container) BankrollHandler() *bankroll.BankrollHandler {
+	if c.handlers.bankrollHandler == nil {
+		c.handlers.bankrollHandler = bankroll.NewBankrollHandler(
+			c.BankrollService(),
+			c.Logger(),
+		)
+	}
+	return c.handlers.bankrollHandler
 }
