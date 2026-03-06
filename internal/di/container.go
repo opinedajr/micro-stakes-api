@@ -11,6 +11,7 @@ import (
 	"github.com/opinedajr/micro-stakes-api/internal/infrastructure/identity"
 	"github.com/opinedajr/micro-stakes-api/internal/shared/config"
 	"github.com/opinedajr/micro-stakes-api/internal/shared/logger"
+	"github.com/opinedajr/micro-stakes-api/internal/strategy"
 	"gorm.io/gorm"
 )
 
@@ -27,18 +28,21 @@ type Container struct {
 type RepositoryDependencies struct {
 	userRepository     auth.UserRepository
 	bankrollRepository bankroll.BankrollRepository
+	strategyRepository strategy.StrategyRepository
 }
 
 type HandlerDependencies struct {
 	healthcheckHandler *healthcheck.Handler
 	authHandler        *auth.AuthHandler
 	bankrollHandler    *bankroll.BankrollHandler
+	strategyHandler    *strategy.StrategyHandler
 }
 
 type ServiceDependencies struct {
 	healthcheckService *healthcheck.Service
 	authService        auth.AuthService
 	bankrollService    bankroll.BankrollService
+	strategyService    strategy.StrategyService
 }
 
 func NewContainer() *Container {
@@ -158,4 +162,31 @@ func (c *Container) BankrollHandler() *bankroll.BankrollHandler {
 		)
 	}
 	return c.handlers.bankrollHandler
+}
+
+func (c *Container) StrategyRepository() strategy.StrategyRepository {
+	if c.repositories.strategyRepository == nil {
+		c.repositories.strategyRepository = strategy.NewPostgresStrategyRepository(c.DB())
+	}
+	return c.repositories.strategyRepository
+}
+
+func (c *Container) StrategyService() strategy.StrategyService {
+	if c.services.strategyService == nil {
+		c.services.strategyService = strategy.NewStrategyService(
+			c.StrategyRepository(),
+			c.Logger(),
+		)
+	}
+	return c.services.strategyService
+}
+
+func (c *Container) StrategyHandler() *strategy.StrategyHandler {
+	if c.handlers.strategyHandler == nil {
+		c.handlers.strategyHandler = strategy.NewStrategyHandler(
+			c.StrategyService(),
+			c.Logger(),
+		)
+	}
+	return c.handlers.strategyHandler
 }
