@@ -32,5 +32,15 @@ func main() {
 		bankrollRoutes.POST("/:bankrollId/reset", container.BankrollHandler().ResetBankroll)
 	}
 
+	strategyRoutes := r.Group("/strategies")
+	strategyRoutes.Use(middleware.AuthMiddleware(container.Config().Keycloak, container.AuthService(), container.Logger()))
+	{
+		strategyRoutes.POST("", container.StrategyHandler().CreateStrategy)
+		strategyRoutes.GET("", container.StrategyHandler().ListStrategies)
+		strategyRoutes.GET("/:strategyId", container.StrategyHandler().GetStrategy)
+		strategyRoutes.PUT("/:strategyId", container.StrategyHandler().UpdateStrategy)
+		strategyRoutes.PATCH("/:strategyId/status", container.StrategyHandler().UpdateStrategyStatus)
+	}
+
 	log.Fatal(r.Run(":3003"))
 }
